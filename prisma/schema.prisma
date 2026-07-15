@@ -1,0 +1,206 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================
+// AUTH MODELS (required by Auth.js / NextAuth v5)
+// ============================================================
+
+model User {
+  id            String    @id @default(cuid())
+  name          String?
+  email         String    @unique
+  emailVerified DateTime?
+  image         String?
+  password      String?   // null for OAuth users
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  accounts   Account[]
+  sessions   Session[]
+  profile    Profile?
+  resume     Resume?
+  interviews Interview[]
+
+  @@index([email])
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@index([userId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+// ============================================================
+// APPLICATION MODELS
+// ============================================================
+
+model Profile {
+  id              String   @id @default(cuid())
+  userId          String   @unique
+  bio             String?
+  currentRole     String?
+  targetRole      String?
+  experienceLevel String?  // "fresher" | "entry" | "intermediate" | "advanced"
+  skills          String   @default("[]") // JSON array stored as string in SQLite
+  targetCompanies String   @default("[]") // JSON array stored as string in SQLite
+  linkedinUrl     String?
+  githubUrl       String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Resume {
+  id              String    @id @default(cuid())
+  userId          String    @unique
+  fileName        String
+  fileSize        Int       // bytes
+  mimeType        String
+  storagePath     String    // relative path or cloud key
+  extractedText   String?   // PDF extracted text
+  structuredData  String?   // JSON stored as string in SQLite
+  analysisStatus  String    @default("pending") // "pending" | "processing" | "done" | "failed"
+  analysisError   String?
+  uploadedAt      DateTime  @default(now())
+  analyzedAt      DateTime?
+  updatedAt       DateTime  @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model Interview {
+  id              String    @id @default(cuid())
+  userId          String
+  type            String    // "hr" | "technical" | "dsa" | "core_cs" | "mixed"
+  role            String
+  experienceLevel String    // "fresher" | "entry" | "intermediate" | "advanced"
+  difficulty      String    // "easy" | "medium" | "hard" | "adaptive"
+  topics          String    @default("[]") // JSON array as string
+  settings        String    // JSON as string
+  status          String    @default("CREATED") // "CREATED"|"READY"|"IN_PROGRESS"|"EVALUATING"|"COMPLETED"|"ABANDONED"
+  totalQuestions  Int       @default(5)
+  currentIndex    Int       @default(0)
+  overallScore    Float?
+  startedAt       DateTime?
+  completedAt     DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  user      User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  questions InterviewQuestion[]
+  report    InterviewReport?
+
+  @@index([userId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model InterviewQuestion {
+  id           String   @id @default(cuid())
+  interviewId  String
+  sequence     Int      // 1-based order
+  question     String
+  category     String
+  difficulty   String
+  isFollowUp   Boolean  @default(false)
+  followUpFor  String?  // questionId this follows up on
+  metadata     String?  // JSON as string
+  askedAt      DateTime @default(now())
+
+  interview Interview       @relation(fields: [interviewId], references: [id], onDelete: Cascade)
+  answer    InterviewAnswer?
+
+  @@index([interviewId])
+  @@index([interviewId, sequence])
+}
+
+model InterviewAnswer {
+  id          String   @id @default(cuid())
+  questionId  String   @unique
+  answerText  String
+  transcript  String?  // voice transcript if different
+  timeSpent   Int?     // seconds
+  submittedAt DateTime @default(now())
+
+  question   InterviewQuestion @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  evaluation AnswerEvaluation?
+}
+
+model AnswerEvaluation {
+  id                  String   @id @default(cuid())
+  answerId            String   @unique
+  score               Float    // 0-10
+  correctness         Float    // 0-10
+  completeness        Float    // 0-10
+  clarity             Float    // 0-10
+  strengths           String   @default("[]") // JSON array as string
+  weaknesses          String   @default("[]") // JSON array as string
+  internalNotes       String?
+  betterAnswer        String?
+  followUpRecommended Boolean  @default(false)
+  suggestedFollowUp   String?
+  evaluatedAt         DateTime @default(now())
+
+  answer InterviewAnswer @relation(fields: [answerId], references: [id], onDelete: Cascade)
+}
+
+model InterviewReport {
+  id             String   @id @default(cuid())
+  interviewId    String   @unique
+  overallScore   Float    // 0-100
+  summary        String
+  categoryScores String   // JSON as string
+  topicScores    String   // JSON as string
+  strengths      String   @default("[]") // JSON array as string
+  weaknesses     String   @default("[]") // JSON array as string
+  actionPlan     String   @default("[]") // JSON array as string
+  rawData        String?  // JSON as string
+  generatedAt    DateTime @default(now())
+
+  interview Interview @relation(fields: [interviewId], references: [id], onDelete: Cascade)
+}
