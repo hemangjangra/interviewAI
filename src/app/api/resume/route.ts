@@ -3,7 +3,18 @@ import { auth } from '@/auth';
 import { prisma } from '@/lib/prisma';
 import { getAIProvider } from '@/lib/ai';
 import { serializeJson, deserializeJson } from '@/lib/db-helpers';
+import { writeFile, mkdir, unlink } from 'fs/promises';
+import { join } from 'path';
+import { existsSync } from 'fs';
+
+const UPLOAD_DIR = join(process.cwd(), 'public', 'uploads', 'resumes');
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
+
+async function ensureUploadDir() {
+  if (!existsSync(UPLOAD_DIR)) {
+    await mkdir(UPLOAD_DIR, { recursive: true });
+  }
+}
 
 async function extractPDFText(buffer: Buffer): Promise<string> {
   try {
@@ -31,8 +42,12 @@ export async function POST(request: Request) {
     if (file.size > MAX_FILE_SIZE) return NextResponse.json({ error: 'File size exceeds 10MB limit.' }, { status: 400 });
 
     const buffer = Buffer.from(await file.arrayBuffer());
+    await ensureUploadDir();
+    const safeFileName = `${session.user.id}_${Date.now()}.pdf`;
+    const filePath = join(UPLOAD_DIR, safeFileName);
+    await writeFile(filePath, buffer);
+
     const extractedText = await extractPDFText(buffer);
-    const safeFileName = 'in-memory';
 
     const resume = await prisma.resume.upsert({
       where: { userId: session.user.id },
@@ -151,7 +166,12 @@ export async function DELETE() {
 
     if (!resume) return NextResponse.json({ error: 'No resume found' }, { status: 404 });
 
-    // Files are parsed in-memory, no local filesystem deletion required on Vercel
+    try {
+      const filePath = join(UPLOAD_DIR, resume.storagePath);
+      if (existsSync(filePath)) await unlink(filePath);
+    } catch (e) {
+      console.warn('[RESUME_FILE_DELETE_WARN]', e);
+    }
 
     await prisma.resume.delete({ where: { id: resume.id } });
     return NextResponse.json({ success: true });
